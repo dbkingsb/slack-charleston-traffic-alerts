@@ -1,13 +1,18 @@
 <?php
-/**
- * Created by IntelliJ IDEA.
- * User: davidkingsbury
- * Date: 6/4/15
- * Time: 4:57 PM
- */
 
 include "lib/slack-api/Slack.php";
 
-echo "woot";
+$token = file_get_contents("token.txt");
 
-?>
+$slack = new Slack($token);
+
+$results = $slack->call(
+    "chat.postMessage",
+    array(
+        "channel" => "#bot-dev",
+        "username" => "Charleston Traffic Alerts",
+        "text" => "test from traffic"
+    )
+);
+
+print_r($results);
