@@ -8,7 +8,7 @@ date_default_timezone_set("America/New_York");
 ########
 $tokens = array();
 if (!file_exists("token.txt")) {
-   exit("token.txt needed with at least 'slack:<yourToken>'\n");
+   exit("token.txt needed with at least 'slack:<yourToken>'.\n");
 }
 $lines = file("token.txt");
 foreach($lines as $line) {
