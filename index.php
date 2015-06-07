@@ -1,120 +1,151 @@
 <?php
 
 include "lib/slack-api/Slack.php";
+include "lib/incident.php";
 date_default_timezone_set("America/New_York");
-$counter_newIncidents = 0;
-$counter_updatedIncidents = 0;
-$counter_removedIncidents = 0;
+define("LIFESPAN", 600);
 
 # TOKENS
+# -----------------------------------------------
 
-$tokens = array();
-$tokensPath = "tokens.txt";
+$tokensPath = "tokens.json";
 if (!file_exists($tokensPath)) {
-   exit("$tokensPath is needed with at least 'slack:[yourToken]'.\n");
+    exit("$tokensPath is needed with at least 'slack:[yourToken]'.\n");
 }
-$lines = file($tokensPath);
-foreach($lines as $line) {
-    $contents = explode(":", $line);
-    $tokens[trim($contents[0])] = trim($contents[1]);
-}
+$serviceTokens = json_decode(file_get_contents($tokensPath));
 
 # KNOWN INCIDENTS
-# ID, last modified
+# -----------------------------------------------
 
+$knownIncidentsPath = "knownIncidents.json";
+/** @var $knownIncidents incident[] */
 $knownIncidents = array();
-$knownIncidentsPath = "knownIncidents.csv";
-$knownIncidentsLines = file_exists($knownIncidentsPath) ? file($knownIncidentsPath) : array();
-foreach($knownIncidentsLines as $line) {
-    $contents = explode(",", $line);
-    $knownIncidents[trim($contents[0])] = trim($contents[1]);
+if (file_exists($knownIncidentsPath)) {
+    $knownIncidents = json_decode(file_get_contents($knownIncidentsPath));
+    if (!$knownIncidents || !is_array($knownIncidents)) {
+        echo "Known incidents did not decode correctly\n";
+        $knownIncidents = array();
+    }
 }
 
-# GET AND PROCESS SERVICE INCIDENTS
+# GET ACTIVE INCIDENTS
+# -----------------------------------------------
 
+/** @var $activeIncidentsFromService incident[] */
+$activeIncidentsFromService = array();
 // Don Holt "32.87,-79.97,32.89,-79.92";
 // Seattle "45.219,-122.325,47.610,-122.107"
 // Charleston "32.746705,-80.049185,32.899666,-79.834793"
 $latLongBox = "32.746705,-80.049185,32.899666,-79.834793";
 $bingBaseUrl = "http://dev.virtualearth.net/REST/v1/Traffic/Incidents/";
-$bingUrl = $bingBaseUrl . $latLongBox . "/?key=" . $tokens["bing"];
+$bingUrl = $bingBaseUrl . $latLongBox . "/?key=" . getToken("bing",$serviceTokens);
 $bingJsonResponse = file_get_contents($bingUrl);
-$bingResponse = json_decode($bingJsonResponse, true);
+$bingResponse = json_decode($bingJsonResponse);
+foreach ($bingResponse->resourceSets[0]->resources as $rawIncident) {
+    $incident = new incident();
+    $incident->id           = $rawIncident->incidentId;
+    $incident->description  = $rawIncident->description;
+    $incident->congestion   = $rawIncident->congestion;
+    $incident->roadClosed   = $rawIncident->roadClosed;
+    $incident->severity     = $rawIncident->severity;
+    $incident->type         = $rawIncident->type;
+    $incident->startTime    = getTimestampFromJsDateMs($rawIncident->start);
+    $incident->endTime      = getTimestampFromJsDateMs($rawIncident->end);
+    $incident->lastModified = getTimestampFromJsDateMs($rawIncident->lastModified);
+    $incident->lastSeen     = time();
+    $activeIncidentsFromService[] = $incident;
+}
 
-// Find new or changed incidents
-$incidentsToReport = array();
-$serviceIncidentIds = array();
-foreach ($bingResponse["resourceSets"][0]["resources"] as $incident) {
-    $serviceIncidentIds[] = $incident["incidentId"];
-    // If we've already reported this incident in its current state
-    if (in_array($incident["incidentId"], array_keys($knownIncidents))) {
-        if ($incident["lastModified"] == $knownIncidents[$incident["incidentId"]]) {
-            // Nothing changed, skip
-            continue;
-        }
-        else {
-            // Changed, remove this entry
-            unset($knownIncidents[$incident["incidentId"]]);
-            // Add to report
-            $incidentsToReport[$incident["incidentId"]] = $incident;
-            $incidentsToReport[$incident["incidentId"]]["update"] = true;
-            $counter_updatedIncidents++;
+# FIND NEW AND UPDATED INCIDENTS
+# -----------------------------------------------
+
+/** @var $newIncidents incident[] */
+$newIncidents = array();
+$updatedIncidents = array();
+foreach ($activeIncidentsFromService as $activeIncidentFromService) {
+    $incidentIsNew = true;
+    foreach ($knownIncidents as $knownIncident) {
+        if ($activeIncidentFromService->id == $knownIncident->id) {
+            if ($activeIncidentFromService->lastModified != $knownIncident->lastModified) {
+                $updatedIncidents[] = array(
+                    "old" => $knownIncident,
+                    "new" => $activeIncidentFromService
+                );
+            }
+            else {
+                $incidentIsNew = false;
+            }
+            $knownIncident->lastSeen = time();
+            break;
         }
     }
-    else {
-        // Add to report
-        $incidentsToReport[$incident["incidentId"]] = $incident;
-        $counter_newIncidents++;
+    if ($incidentIsNew) {
+        $newIncidents[] = $activeIncidentFromService;
     }
-    // Add to known incidents
-    $knownIncidents[$incident["incidentId"]] = $incident["lastModified"];
 }
 
 # KNOWN INCIDENT BOOK KEEPING
-
-// TODO: Known incidents need to be objects to report info on them after their gone from the service
-$knownIncidentsIdsToRemove = array();
-foreach ($knownIncidents as $knownId => $knownDate) {
-    if (!in_array($knownId, $serviceIncidentIds)) {
-        $msg = "*Update* - Incident '$knownId'' is no longer being reported";
-        postNewIncident($msg, $tokens["slack"]);
-        $knownIncidentsIdsToRemove[] = $knownId;
-        $counter_removedIncidents++;
+# -----------------------------------------------
+foreach ($newIncidents as $newIncident) {
+    $knownIncidents[] = $newIncident;
+}
+$removedIncidentCount = 0;
+for($i=0,$l = count($knownIncidents); $i<$l; $i++) {
+    if ($knownIncidents[$i]->lastSeen < time() - LIFESPAN) {
+        unset($knownIncidents[$i]);
+        $removedIncidentCount++;
     }
 }
-foreach ($knownIncidentsIdsToRemove as $id) {
-    unset($knownIncidents[$id]);
-}
+file_put_contents($knownIncidentsPath, json_encode($knownIncidents));
 
-// Write known incidents to file
-$knownIncidentsCSVRows = array();
-foreach ($knownIncidents as $id => $date) {
-    $knownIncidentsCSVRows[] = "$id,$date";
-}
-file_put_contents($knownIncidentsPath, implode("\n", $knownIncidentsCSVRows));
+# CHAT TO SLACK
+# -----------------------------------------------
 
-# POST NEW INCIDENTS TO SLACK
-
-foreach ($incidentsToReport as $incident) {
-    $date = getLastModifiedDate($incident);
-    $state = "NEW";
-    if ($incident["update"]) {
-        $state = "UPDATE";
-    }
-    $msg = "*$state* - {$incident["description"]} _($date)_ ";
-    $result = postNewIncident($msg, $tokens["slack"]);
+foreach ($newIncidents as $newIncident) {
+    $date = getFormattedDate($newIncident->lastModified);
+    $msg = "*NEW* - {$newIncident->description} _($date)_ ";
+    $result = postNewIncident($msg, getToken("slack",$serviceTokens));
     if ($result["ok"] != 1) {
-       echo "Failed to post incident '{$incident["incidentId"]}''\n";
+       echo "Failed to post incident '{$newIncident->id}'\n";
+    };
+}
+
+foreach ($updatedIncidents as $updatedIncident) {
+    /** @var $old incident */
+    /** @var $new incident */
+    $old = $updatedIncidents["old"];
+    $new = $updatedIncidents["new"];
+    // Find changed values
+    $propertiesToChat = array();
+    foreach ($new as $key => $newValue) {
+        if ($newValue != $old[$key]) {
+            $propertiesToChat[$key] = $newValue;
+        }
+    }
+    // Format message
+    $date = getFormattedDate($new->lastModified);
+    $msg = "*UPDATE* on {$new->description}\n";
+    foreach ($propertiesToChat as $key => $value) {
+        $msg .= "* *$key*: $value\n";
+    }
+    $msg = trim($msg);
+    // Send
+    $result = postNewIncident($msg, getToken("slack",$serviceTokens));
+    if ($result["ok"] != 1) {
+        echo "Failed to post incident '{$new->id}'\n";
     };
 }
 
 exit(
-    "New incidents: $counter_newIncidents\n" .
-    "Updated incidents: $counter_updatedIncidents\n" .
-    "Removed incidents: $counter_removedIncidents\n"
+    "Active incidents: " . count($knownIncidents) . "\n" .
+    "New incidents: " . count($newIncidents) . "\n" .
+    "Updated incidents: " . count($updatedIncidents) . "\n" .
+    "Removed incidents: $removedIncidentCount\n"
 );
 
-# FUNCTIONS
+# -----------------------------------------------
+# HELPERS
+# -----------------------------------------------
 
 function postNewIncident($msg, $token) {
     $slack = new Slack($token);
@@ -131,10 +162,20 @@ function postNewIncident($msg, $token) {
     return $results;
 }
 
-function getLastModifiedDate($incident, $format="H:i:s") {
-    $rawTimestamp = $incident["lastModified"];
-    $timestamp = substr($rawTimestamp,6,-5);
+function getFormattedDate($timestamp, $format="H:i:s") {
     return date($format, $timestamp);
 }
 
+function getToken($serviceName, $serviceTokens) {
+    $token = false;
+    foreach ($serviceTokens as $serviceToken) {
+        if ($serviceToken->serviceName == $serviceName) {
+            $token = $serviceToken->token;
+        }
+    }
+    return $token;
+}
 
+function getTimestampFromJsDateMs($rawTimestamp) {
+    return intval(substr($rawTimestamp,6,-5));
+}
