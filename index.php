@@ -1,5 +1,10 @@
 <?php
 
+/**
+ * TODO: Channel in ignored file
+ * TODO: script output on single line
+ */
+
 include "lib/slack-api/Slack.php";
 include "lib/incident.php";
 date_default_timezone_set("America/New_York");
@@ -21,8 +26,8 @@ $knownIncidentsPath = "knownIncidents.json";
 /** @var $knownIncidents incident[] */
 $knownIncidents = array();
 if (file_exists($knownIncidentsPath)) {
-    $knownIncidents = json_decode(file_get_contents($knownIncidentsPath));
-    if (!$knownIncidents || !is_array($knownIncidents)) {
+    $knownIncidents = json_decode(file_get_contents($knownIncidentsPath), true);
+    if ($knownIncidents === null || !is_array($knownIncidents)) {
         echo "Known incidents did not decode correctly\n";
         $knownIncidents = array();
     }
