@@ -1,8 +1,6 @@
 <?php
 
 /**
- * TODO: Channel in ignored file
- * TODO: script output on single line
  * Don Holt "32.87,-79.97,32.89,-79.92";
  * Seattle "45.219,-122.325,47.610,-122.107"
  * Charleston "32.746705,-80.049185,32.899666,-79.834793"
