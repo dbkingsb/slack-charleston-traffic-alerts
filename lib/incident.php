@@ -1,41 +1,61 @@
 <?php
 
 class incident {
-    var $id;
-    var $congestion;
-    var $description;
-    var $startTime;
-    var $endTime;
-    var $lastModified;
-    var $lastSeen;
+    public $id;
+    public $congestion;
+    public $description;
+    public $startTime;
+    public $endTime;
+    public $lastModified;
+    public $lastSeen;
 
     /**
      * @var bool
      */
-    var $roadClosed;
+    public $roadClosed;
 
     /**
      * @var int
-     * 1: LowImpact
-     * 2: Minor
-     * 3: Moderate
-     * 4: Serious
      */
-    var $severity;
+    public $severity;
+
 
     /**
      * @var int
-     * 1: Accident
-     * 2: Congestion
-     * 3: DisabledVehicle
-     * 4: MassTransit
-     * 5: Miscellaneous
-     * 6: OtherNews
-     * 7: PlannedEvent
-     * 8: RoadHazard
-     * 9: Construction
-     * 10: Alert
-     * 11: Weather
      */
-    var $type;
+    public $type;
+
+
+    private static $severity_descriptions = array(
+       1 => "Low Impact",
+       2 => "Minor",
+       3 => "Moderate",
+       4 => "Serious"
+    );
+
+    private static $type_descriptions = array(
+       1  => "Accident",
+       2  => "Congestion",
+       3  => "Disabled Vehicle",
+       4  => "Mass Transit",
+       5  => "Miscellaneous",
+       6  => "Other News",
+       7  => "Planned Event",
+       8  => "Road Hazard",
+       9  => "Construction",
+       10 => "Alert",
+       11 => "Weather"
+    );
+
+    function severity_as_string() {
+       return array_key_exists($this->severity, self::$severity_descriptions)
+          ? self::$severity_descriptions[$this->severity]
+          : "Unknown";
+    }
+
+    function type_as_string() {
+       return array_key_exists($this->type, self::$type_descriptions)
+          ? self::$type_descriptions[$this->type]
+          : "Unknown";
+    }
 }

@@ -172,12 +172,12 @@ function createNewIncidentAttachments($incident)
     $fields = array(
         array(
             "title" => "Type",
-            "value" => $incident->type,
+            "value" => $incident->type_as_string(),
             "short" => true
         ),
         array(
             "title" => "Severity",
-            "value" => $incident->severity,
+            "value" => $incident->severity_as_string(),
             "short" => true
         )
     );
