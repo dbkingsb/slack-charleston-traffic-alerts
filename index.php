@@ -143,7 +143,7 @@ foreach ($updatedIncidents as $updatedIncident) {
     // Find changed values
     $propertiesToChat = array();
     foreach ($new as $key => $newValue) {
-        if ($key == "lastModified" || $key == "lastSeen") {
+        if ($key == "lastModified" || $key == "lastSeen" || $key == "startTime" || $key == "endTime") {
             continue;
         }
         if ($newValue != $old->$key) {
