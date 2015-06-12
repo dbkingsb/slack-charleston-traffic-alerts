@@ -94,6 +94,35 @@ foreach ($activeIncidentsFromService as $activeIncidentFromService) {
     }
 }
 
+# KNOWN INCIDENT BOOK KEEPING
+# -----------------------------------------------
+foreach ($newIncidents as $newIncident) {
+    $knownIncidents[] = $newIncident;
+}
+$removedDuplicateIncidentCount = 0;
+$removedIncidentCount = 0;
+$uniqueKnownIds = array();
+for ($i = 0; $i < count($knownIncidents); $i++) {
+    // Check for duplicates (this usually only happens when testing code)
+    if (!in_array($knownIncidents[$i]->id, $uniqueKnownIds)) {
+        $uniqueKnownIds[] = $knownIncidents[$i]->id;
+    }
+    else {
+        // ID was already seen, remove this entry
+        array_splice($knownIncidents, $i, 1);
+        $i--;
+        $removedDuplicateIncidentCount++;
+        continue;
+    }
+    // Remove old, inactive, incidents
+    if ($knownIncidents[$i]->endTime < time() && $knownIncidents[$i]->lastSeen < time() - LIFESPAN) {
+        array_splice($knownIncidents, $i, 1);
+        $i--;
+        $removedIncidentCount++;
+    }
+}
+file_put_contents($knownIncidentsPath, json_encode($knownIncidents));
+
 # CHAT TO SLACK
 # -----------------------------------------------
 
@@ -101,8 +130,7 @@ foreach ($newIncidents as $newIncident) {
     $attachments = createNewIncidentAttachments($newIncident);
     $result = postAlert($attachments);
     if (!$result) {
-        // TODO: Remove this failure from the $newIncidents array so it doesn't get
-        // saved as a known.
+        // TODO: Remove this failure from the $newIncidents array so it doesn't get saved as a known.
     }
 }
 
@@ -130,31 +158,17 @@ foreach ($updatedIncidents as $updatedIncident) {
     $result = postAlert($attachments);
 }
 
-# KNOWN INCIDENT BOOK KEEPING
-# -----------------------------------------------
-foreach ($newIncidents as $newIncident) {
-    $knownIncidents[] = $newIncident;
-}
-$removedIncidentCount = 0;
-for ($i = 0, $l = count($knownIncidents); $i < $l; $i++) {
-    if ($knownIncidents[$i]->lastSeen < time() - LIFESPAN) {
-        unset($knownIncidents[$i]);
-        $removedIncidentCount++;
-    }
-}
-array_values($knownIncidents);
-file_put_contents($knownIncidentsPath, json_encode($knownIncidents));
-
 # EXIT
 # -----------------------------------------------
 
 $exitMsg = date("y-m-d H:i:s") . "\n";
-if (count($newIncidents) || $actualUpdatedIncidentCount || $removedIncidentCount) {
+if (count($newIncidents) || $actualUpdatedIncidentCount || $removedIncidentCount || $removedDuplicateIncidentCount) {
     $exitMsg .=
         "Active incidents: " . count($knownIncidents) . "\n" .
         "New incidents: " . count($newIncidents) . "\n" .
         "Updated incidents: " . $actualUpdatedIncidentCount . "\n" .
-        "Removed incidents: $removedIncidentCount\n";
+        "Removed incidents: $removedIncidentCount\n" .
+        "Removed duplicate incidents: $removedDuplicateIncidentCount\n";
 }
 exit($exitMsg);
 
@@ -198,7 +212,7 @@ function createNewIncidentAttachments($incident)
     $attachments = array(
         array(
             "fallback" => "*NEW _($date)_*\n{$incident->description}",
-            "pretext" => "New traffic alert reported on $date",
+            "pretext" => "New traffic alert reported on $date _(ID {$incident->id})_",
             "title" => $incident->description,
             "color" => "#FF0000",
             "mrkdwn_in" => array("pretext"),
@@ -228,7 +242,7 @@ function createUpdateIncidentAttachments($old, $new, $changedProperties)
     $attachments = array(
         array(
             "fallback" => "*UPDATE _($date)_*\n{$old->description}",
-            "pretext" => "*Update* of \"{$old->description}\" at $time",
+            "pretext" => "*Update* of \"{$old->description}\" at $time _(ID {$old->id})_",
             "title" => "The following properties have changed:",
             "color" => "#FF0000",
             "mrkdwn_in" => array("pretext"),
